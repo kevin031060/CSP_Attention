@@ -92,6 +92,10 @@ class AttentionModel(nn.Module):
             
             if self.is_vrp and self.allow_partial:  # Need to include the demand if split delivery allowed
                 self.project_node_step = nn.Linear(1, 3 * embedding_dim, bias=False)
+        elif self.is_csp:
+            node_dim = 2  # x, y
+            self.first_placeholder = nn.Parameter(torch.Tensor(embedding_dim))
+            self.first_placeholder.data.uniform_(-1,1)
         else:  # TSP
             assert problem.NAME == "tsp" or problem.NAME == "csp", "Unsupported problem: {}".format(problem.NAME)
             step_context_dim = 2 * embedding_dim  # Embedding of first and last node
@@ -114,10 +118,24 @@ class AttentionModel(nn.Module):
             normalization=normalization
         )
 
+        if False:
+            self.dynamic_embedder = GraphAttentionEncoder(
+                n_heads=n_heads,
+                embed_dim=embedding_dim,
+                n_layers=self.n_encode_layers,
+                normalization=normalization
+            )
+            step_context_dim = 2 * embedding_dim
+            self.W_placeholder = nn.Parameter(torch.Tensor(2 * embedding_dim))
+            self.W_placeholder.data.uniform_(-1, 1)  # Placeholder should be in range of activations
+            self.project_step_context = nn.Linear(step_context_dim, embedding_dim, bias=False)
+
+        # self.project_step_context = nn.Linear(embedding_dim, embedding_dim, bias=False)
+
         # For each node we compute (glimpse key, glimpse value, logit key) so 3 * embedding_dim
         self.project_node_embeddings = nn.Linear(embedding_dim, 3 * embedding_dim, bias=False)
         self.project_fixed_context = nn.Linear(embedding_dim, embedding_dim, bias=False)
-        self.project_step_context = nn.Linear(step_context_dim, embedding_dim, bias=False)
+        # self.project_step_context = nn.Linear(step_context_dim, embedding_dim, bias=False)
         assert embedding_dim % n_heads == 0
         # Note n_heads * val_dim == embedding_dim so input to project_out is embedding_dim
         self.project_out = nn.Linear(embedding_dim, embedding_dim, bias=False)
@@ -369,7 +387,7 @@ class AttentionModel(nn.Module):
         # query就是上面两个(512,1,128)相加
         query = fixed.context_node_projected + \
                 self.project_step_context(self._get_parallel_step_context(fixed.node_embeddings, state))
-
+        a=self._get_parallel_step_context(fixed.node_embeddings, state)
         # Compute keys and values for the nodes
         glimpse_K, glimpse_V, logit_K = self._get_attention_node_data(fixed, state)
 
@@ -455,14 +473,19 @@ class AttentionModel(nn.Module):
         current_node = state.get_current_node()
         batch_size, num_steps = current_node.size()
         if state.i.item() == 0:
-            decoder_hidden = self.x0.expand(batch_size, -1, -1)
+            # decoder_hidden = self.x0.expand(batch_size, -1, -1)
+            decoder_hidden = self.first_placeholder[None, None, :].expand(batch_size, 1, -1)
         else:
             decoder_hidden = fixed.node_embeddings.gather(
                 1,
                 current_node[:, :, None].expand(batch_size, 1, fixed.node_embeddings.size(-1))
             )
+
+        # decoder_hidden = self.project_step_context(decoder_hidden)
+
         if last_hh is None:
             last_hh = fixed.context_node_projected.transpose(1, 0)
+        self.gru.flatten_parameters()
         rnn_out, last_hh = self.gru(decoder_hidden, last_hh)
 
         query = rnn_out
@@ -471,12 +494,15 @@ class AttentionModel(nn.Module):
         glimpse_K, glimpse_V, logit_K = self._get_attention_node_data(fixed, state)
         # add dynamic
         dynamic_hidden = self.init_dynamic(state.get_dynamic().transpose(1, 2))
+
         logit_K = logit_K + dynamic_hidden.unsqueeze(1)
+        # logit_K = logit_K.mul(1+dynamic_hidden.unsqueeze(1))
         # Compute the mask
         mask = state.get_mask()
 
         # Compute logits (unnormalized log_p)
         log_p, glimpse = self._one_to_many_logits(query, glimpse_K, glimpse_V, logit_K, mask)
+        # log_p, glimpse = self._one_to_many_logits_one_layer(query, glimpse_K, glimpse_V, logit_K, mask)
 
         if normalize:
             log_p = F.log_softmax(log_p / self.temp, dim=-1)
@@ -575,6 +601,19 @@ class AttentionModel(nn.Module):
                     embeddings_per_step
                 ), 2)
             ), 1)
+
+    def _one_to_many_logits_one_layer(self, query, glimpse_K, glimpse_V, logit_K, mask):
+
+        logit_K = logit_K.squeeze(1)
+        logits = torch.matmul(query, logit_K.transpose(-2, -1))/ math.sqrt(query.size(-1))
+
+        # From the logits compute the probabilities by clipping, masking and softmax
+        if self.tanh_clipping > 0:
+            logits = F.tanh(logits) * self.tanh_clipping
+        if self.mask_logits:
+            logits[mask] = -math.inf
+
+        return logits, logits
 
     def _one_to_many_logits(self, query, glimpse_K, glimpse_V, logit_K, mask):
         #  glimpse_K, glimpse_V size 都是 (8,512,1,20,16)

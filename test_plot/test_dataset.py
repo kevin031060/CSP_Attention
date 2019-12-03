@@ -77,7 +77,6 @@ def render(static, tour_indices, save_path, test = False):
     """Plots the found tours."""
     # if not test:
     #     matplotlib.use('Agg')
-    matplotlib.use('Agg')
     # if not os.path.exists(save_path):
     #     os.makedirs(save_path)
 
@@ -118,8 +117,8 @@ def render(static, tour_indices, save_path, test = False):
         ax.scatter(static_[0], static_[1], s=4, c='r', zorder=2)
         ax.scatter(data[0, 0], data[1, 0], s=20, c='k', marker='*', zorder=3)
 
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
+        # ax.set_xlim(0, 1)
+        # ax.set_ylim(0, 1)
 
     plt.tight_layout()
     plt.show()

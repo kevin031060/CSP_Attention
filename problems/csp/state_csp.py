@@ -79,7 +79,11 @@ class StateCSP(NamedTuple):
             ),
             cover_range=cover_range[0],
             dynamic=torch.ones(batch_size, 1, n_loc, dtype=torch.float, device=loc.device),
-            dynamic_updation=torch.arange(cover_range[0], device=loc.device).float().expand(batch_size,1,-1)/cover_range[0],
+            # dynamic_updation=torch.log(torch.arange(cover_range[0], device=loc.device).float()+1.0).
+            #                      expand(batch_size,1,-1)/torch.log(cover_range[0].float()),
+            dynamic_updation=torch.arange(cover_range[0], device=loc.device).float().expand(batch_size, 1, -1) /
+                             cover_range[0],
+
             lengths=torch.zeros(batch_size, 1, device=loc.device),
             cur_coord=None,
             i=torch.zeros(1, dtype=torch.int64, device=loc.device)  # Vector with length num_steps

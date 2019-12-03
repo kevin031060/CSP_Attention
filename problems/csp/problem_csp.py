@@ -26,7 +26,8 @@ class CSP(object):
 
         nums = [tour[tour>-1].size(-1) for tour in pi]
         # Length is distance (L2-norm of difference) from each next location from its prev and of last from first
-        return torch.tensor(nums, device=pi.device).float()/10+lengths, None
+        # return torch.tensor(nums, device=pi.device).float()/10+lengths, None
+        return lengths, None
 
     @staticmethod
     def make_dataset(*args, **kwargs):

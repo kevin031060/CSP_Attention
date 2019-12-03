@@ -118,6 +118,7 @@ class CriticBaseline(Baseline):
         self.critic = critic
 
     def eval(self, x, c):
+        x=x['loc']
         v = self.critic(x)
         # Detach v since actor should not backprop through baseline, only for loss
         return v.detach(), F.mse_loss(v, c.detach())

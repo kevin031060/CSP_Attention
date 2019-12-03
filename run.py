@@ -79,7 +79,7 @@ def run(opts):
     if opts.baseline == 'exponential':
         baseline = ExponentialBaseline(opts.exp_beta)
     elif opts.baseline == 'critic' or opts.baseline == 'critic_lstm':
-        assert problem.NAME == 'tsp', "Critic only supported for TSP"
+        assert problem.NAME == 'tsp' or 'csp', "Critic only supported for TSP"
         baseline = CriticBaseline(
             (
                 CriticNetworkLSTM(
