@@ -139,11 +139,15 @@ def mutate(loc, tour, cover_range, best_tour, best_cost):
         best_cost = best_cost
     return tour, best_tour, best_cost
 def LS(loc, cover_range, tour=None):
-    print(np.random.seed())
+    # print(np.random.seed())
     num_nodes = loc.shape[0]
+
     if tour is None:
         tour = init_solution(loc, cover_range)
         print("Initial Solution!!")
+
+    print(loc.shape, tour.shape)
+
     ids = np.arange(num_nodes)
 
     best_cost = dist(loc, tour)
@@ -193,10 +197,10 @@ def LS(loc, cover_range, tour=None):
             if iter_no_change > mutate_iters:
                 tour, best_tour, best_cost = mutate(loc, tour, cover_range, best_tour, best_cost)
         # if iter_no_change > loc.shape[0]:
-        if iter_no_change > 50:
+        if iter_no_change > 30:
             break
         # log
-        if i % 100 == 0:
+        if i % 40 == 0:
             print("Iteration %d, Current distance: %2.3f" % (i, best_cost))
     return best_tour
 

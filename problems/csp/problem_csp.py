@@ -21,13 +21,24 @@ class CSP(object):
         batch_size,_,_ = loc.size()
 
         lengths = [cal_dist(coor.gather(0, tour[tour>-1].expand(2,-1).transpose(1,0))).unsqueeze(0) for coor, tour in zip(loc, pi)]
+
+        center_distance = [cal_center_dist(coor.gather(0, tour[tour > -1].expand(2, -1).transpose(1, 0))).unsqueeze(0) for coor, tour
+                   in zip(loc, pi)]
+
         # Gather dataset in order of tour
         lengths = torch.cat(lengths)
-
+        center_distance = torch.cat(center_distance)
         nums = [tour[tour>-1].size(-1) for tour in pi]
+
+        # print(center_distance)
         # Length is distance (L2-norm of difference) from each next location from its prev and of last from first
         # return torch.tensor(nums, device=pi.device).float()/10+lengths, None
+
+        # if (torch.rand(1)<0.1):
+        #     print(torch.mean(lengths))
         return lengths, None
+
+
 
     @staticmethod
     def make_dataset(*args, **kwargs):
@@ -37,27 +48,33 @@ class CSP(object):
     def make_state(*args, **kwargs):
         return StateCSP.initialize(*args, **kwargs)
 
-    # @staticmethod
-    # def beam_search(input, beam_size, expand_size=None,
-    #                 compress_mask=False, model=None, max_calc_batch_size=4096):
-    #
-    #     assert model is not None, "Provide model"
-    #
-    #     fixed = model.precompute_fixed(input)
-    #
-    #     def propose_expansions(beam):
-    #         return model.propose_expansions(
-    #             beam, fixed, expand_size, normalize=True, max_calc_batch_size=max_calc_batch_size
-    #         )
-    #
-    #     state = TSP.make_state(
-    #         input, visited_dtype=torch.int64 if compress_mask else torch.uint8
-    #     )
-    #
-    #     return beam_search(state, beam_size, propose_expansions)
+    @staticmethod
+    def beam_search(input, beam_size, expand_size=None,
+                    compress_mask=False, model=None, max_calc_batch_size=4096):
+
+        assert model is not None, "Provide model"
+
+        fixed = model.precompute_fixed(input)
+
+        def propose_expansions(beam):
+            return model.propose_expansions(
+                beam, fixed, expand_size, normalize=True, max_calc_batch_size=max_calc_batch_size
+            )
+
+        state = CSP.make_state(
+            input, visited_dtype=torch.int64 if compress_mask else torch.uint8
+        )
+
+        return beam_search(state, beam_size, propose_expansions)
+
+def cal_center_dist(loc):
+
+    center = torch.ones((loc.size(0), loc.size(1)), device=loc.device) * 0.5
+    return (loc - center).norm(p=2, dim=-1).sum()
 
 def cal_dist(ordered_loc):
-    return (ordered_loc[1:,:]-ordered_loc[:-1,:]).norm(p=2,dim=-1).sum() + (ordered_loc[0,:]-ordered_loc[-1,:]).norm(p=2,dim=-1)
+    return (ordered_loc[1:, :] - ordered_loc[:-1, :]).norm(p=2, dim=-1).sum() + (
+                    ordered_loc[0, :] - ordered_loc[-1, :]).norm(p=2, dim=-1)
 
 class CSPDataset(Dataset):
     

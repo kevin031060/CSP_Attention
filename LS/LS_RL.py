@@ -3,8 +3,26 @@ import matplotlib
 import matplotlib.pyplot as plt
 from LS.LS_2opt import LS_2opt
 
-seed=np.random.randint(123456)
-np.random.seed(seed)
+
+
+def init_solution(loc, cover_range):
+    node_num, _ = loc.shape
+    ids = np.arange(node_num)
+    uncovered_indices = ids
+    num_uncovered = node_num
+    tour=[]
+
+    while num_uncovered>0:
+        n_selected = np.random.choice(uncovered_indices)
+        tour.append(n_selected)
+        cover_indices = cover_idx(loc, n_selected, cover_range)
+        uncovered_indices = np.array([idx for idx in uncovered_indices if idx not in cover_indices])
+        num_uncovered = uncovered_indices.shape[0]
+
+    print('Init_solution:',tour)
+    print('Assert covered check:',check_cover(loc, tour, cover_range))
+    return np.array(tour)
+
 def cover_idx(loc, chosen_idx, cover_range):
     dists = np.square(loc-loc[chosen_idx]).sum(-1)
     return dists.argsort()[:cover_range+1]
@@ -122,15 +140,18 @@ def mutate(loc, tour, cover_range, best_tour, best_cost):
         best_cost = best_cost
     return tour, best_tour, best_cost
 def LS(loc, cover_range, tour):
-    print(np.random.seed())
+    # print(np.random.seed())
     num_nodes = loc.shape[0]
+    if tour is None:
+        tour = init_solution(loc, cover_range)
+        print("Initial Solution!!")
 
     ids = np.arange(num_nodes)
 
     best_cost = dist(loc, tour)
     best_tour = tour
     iter_no_change = 0
-
+    print("Initial city Length:", dist(loc, tour))
     for i in range(max_iters):
         nodes_not_select = np.setdiff1d(ids, tour)
         # delete nodes
@@ -182,7 +203,7 @@ def LS(loc, cover_range, tour):
             print("Iteration %d, Current distance: %2.3f" % (i, best_cost))
     return best_tour
 
-del_perc = 0.1
+del_perc = 0.2
 max_iters = 400
 mutate_iters = 15
 if_diverse = True

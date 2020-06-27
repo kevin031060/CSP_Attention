@@ -31,11 +31,14 @@ def get_options(args=None):
     # Training
     parser.add_argument('--lr_model', type=float, default=1e-4, help="Set the learning rate for the actor network")
     parser.add_argument('--lr_critic', type=float, default=1e-4, help="Set the learning rate for the critic network")
+    #
+    #
+    # !! changed 1.0
     parser.add_argument('--lr_decay', type=float, default=1.0, help='Learning rate decay per epoch')
     parser.add_argument('--eval_only', action='store_true', help='Set this value to only evaluate model')
     parser.add_argument('--n_epochs', type=int, default=30, help='The number of epochs to train')
-    parser.add_argument('--seed', type=int, default=1234, help='Random seed to use')
-    parser.add_argument('--max_grad_norm', type=float, default=1.0,
+    parser.add_argument('--seed', type=int, default=12345, help='Random seed to use') #1234
+    parser.add_argument('--max_grad_norm', type=float, default=5,
                         help='Maximum L2 norm for gradient clipping, default 1.0 (0 to disable clipping)')
     parser.add_argument('--no_cuda', action='store_true', help='Disable CUDA')
     parser.add_argument('--exp_beta', type=float, default=0.8,
@@ -67,10 +70,11 @@ def get_options(args=None):
     parser.add_argument('--checkpoint_epochs', type=int, default=1,
                         help='Save checkpoint every n epochs (default 1), 0 to save no checkpoints')
     parser.add_argument('--load_path', help='Path to load model parameters and optimizer state from')
-    # parser.add_argument('--resume', default="outputs/csp_100/run_20191112T171535/epoch-9.pt", help='Resume from previous checkpoint file')
+    # parser.add_argument('--resume', default="outputs/csp_100/run_20200622T145808/epoch-56.pt", help='Resume from previous checkpoint file')
     parser.add_argument('--resume', help='Resume from previous checkpoint file')
     parser.add_argument('--no_tensorboard', action='store_true', help='Disable logging TensorBoard files')
     parser.add_argument('--no_progress_bar', action='store_true', help='Disable progress bar')
+    parser.add_argument('--head', type=int, default=8, help='nums of head')
 
     opts = parser.parse_args(args)
 

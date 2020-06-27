@@ -9,31 +9,43 @@ import matplotlib.pyplot as plt
 
 class Test_CSPDataset(Dataset):
 
-    def __init__(self, size=50, num_samples=500000, cover_range=7, seed = None, tsp_name=None):
+    def __init__(self, size=50, num_samples=500000, cover_range=7, seed = None, tsp_name=None, sample_mode=False):
         super(Test_CSPDataset, self).__init__()
 
-        if seed is None:
-            seed = np.random.randint(123456789)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
+        if seed is not None:
+            np.random.seed(seed)
+            torch.manual_seed(seed)
 
-        if tsp_name is None:
+
+        if sample_mode:
+            loc = torch.rand(size, 2)
             self.data = [
                 {
-                    'loc': torch.rand(size, 2),
+                    'loc': loc,
                     'cover_range': cover_range
                 }
                 for i in range(num_samples)
             ]
         else:
-            dataset = tsplib_dataset(tsp_name)
-            self.data = [
-                {
-                    'loc': dataset[i],
-                    'cover_range': cover_range
-                }
-                for i in range(num_samples)
-            ]
+            if tsp_name is None:
+                self.data = [
+                    {
+                        'loc': torch.rand(size, 2),
+                        'cover_range': cover_range
+                    }
+                    for i in range(num_samples)
+                ]
+            else:
+                dataset = tsplib_dataset(tsp_name)
+                self.data = [
+                    {
+                        'loc': dataset[i],
+                        'cover_range': cover_range
+                    }
+                    for i in range(num_samples)
+                ]
+
+
 
         self.size = len(self.data)
         self.cover_range = cover_range
@@ -57,7 +69,8 @@ def tour_len_dist(batch, pi):
 
 def cal_dist(ordered_loc):
     return (ordered_loc[1:,:]-ordered_loc[:-1,:]).norm(p=2,dim=-1).sum() + (ordered_loc[0,:]-ordered_loc[-1,:]).norm(p=2,dim=-1)
-
+def clean_tour(tour):
+    return tour[tour > -1]
 
 def tsplib_dataset(tsp_name):
     tsp_name = os.path.join("TSPLIB", '%s.tsp' % tsp_name)
@@ -81,8 +94,11 @@ def render(static, tour_indices, save_path, test = False):
     #     os.makedirs(save_path)
 
     plt.close('all')
-    static = static.cpu()
-    tour_indices = tour_indices.cpu()
+    if isinstance(static, torch.Tensor):
+        static = static.cpu()
+    if isinstance(tour_indices, torch.Tensor):
+        tour_indices = tour_indices.cpu()
+
     num_plots = 3 if int(np.sqrt(len(tour_indices))) >= 3 else 1
 
     _, axes = plt.subplots(nrows=num_plots, ncols=num_plots,

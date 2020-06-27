@@ -112,6 +112,7 @@ def load_model(path, epoch=None):
         n_encode_layers=args['n_encode_layers'],
         mask_inner=True,
         mask_logits=True,
+        n_heads= args['head'] if 'head' in args else 8,
         normalization=args['normalization'],
         tanh_clipping=args['tanh_clipping'],
         checkpoint_encoder=args.get('checkpoint_encoder', False),

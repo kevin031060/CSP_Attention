@@ -10,6 +10,9 @@ from nets.graph_encoder import GraphAttentionEncoder
 from torch.nn import DataParallel
 from utils.beam_search import CachedLookup
 from utils.functions import sample_many
+import numpy as np
+
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def set_decode_type(model, decode_type):
@@ -76,7 +79,7 @@ class AttentionModel(nn.Module):
         self.n_heads = n_heads
         self.checkpoint_encoder = checkpoint_encoder
         self.shrink_size = shrink_size
-
+        self.tmp = None
         # Problem specific context parameters (placeholder and step context dimension)
         if self.is_vrp or self.is_orienteering or self.is_pctsp:
             # Embedding of last node + remaining_capacity / remaining length / remaining prize to collect
@@ -106,7 +109,8 @@ class AttentionModel(nn.Module):
             self.W_placeholder.data.uniform_(-1, 1)  # Placeholder should be in range of activations
 
         self.init_embed = nn.Linear(node_dim, embedding_dim)
-        self.init_dynamic = nn.Linear(1, embedding_dim)
+        # self.init_dynamic = nn.Linear(1, embedding_dim)
+        self.init_dynamic = nn.Linear(1, embedding_dim, bias=False)
         self.gru = nn.GRU(embedding_dim, embedding_dim, 1,
                           batch_first=True)
         self.x0 = torch.zeros((1, 1, embedding_dim), requires_grad=True, device=device)
@@ -119,12 +123,12 @@ class AttentionModel(nn.Module):
         )
 
         if False:
-            self.dynamic_embedder = GraphAttentionEncoder(
-                n_heads=n_heads,
-                embed_dim=embedding_dim,
-                n_layers=self.n_encode_layers,
-                normalization=normalization
-            )
+            # self.dynamic_embedder = GraphAttentionEncoder(
+            #     n_heads=n_heads,
+            #     embed_dim=embedding_dim,
+            #     n_layers=self.n_encode_layers,
+            #     normalization=normalization
+            # )
             step_context_dim = 2 * embedding_dim
             self.W_placeholder = nn.Parameter(torch.Tensor(2 * embedding_dim))
             self.W_placeholder.data.uniform_(-1, 1)  # Placeholder should be in range of activations
@@ -135,7 +139,7 @@ class AttentionModel(nn.Module):
         # For each node we compute (glimpse key, glimpse value, logit key) so 3 * embedding_dim
         self.project_node_embeddings = nn.Linear(embedding_dim, 3 * embedding_dim, bias=False)
         self.project_fixed_context = nn.Linear(embedding_dim, embedding_dim, bias=False)
-        # self.project_step_context = nn.Linear(step_context_dim, embedding_dim, bias=False)
+        self.project_query = nn.Linear(2*embedding_dim, embedding_dim, bias=False)
         assert embedding_dim % n_heads == 0
         # Note n_heads * val_dim == embedding_dim so input to project_out is embedding_dim
         self.project_out = nn.Linear(embedding_dim, embedding_dim, bias=False)
@@ -159,6 +163,7 @@ class AttentionModel(nn.Module):
             embeddings, _ = self.embedder(self._init_embed(input))
 
         _log_p, pi = self._inner_rnn(input, embeddings)
+        # _log_p, pi = self._inner(input, embeddings)
 
         cost, mask = self.problem.get_costs(input, pi)
         # Log likelyhood is calculated within the model since returning it per action does not work well with
@@ -181,17 +186,24 @@ class AttentionModel(nn.Module):
 
     def propose_expansions(self, beam, fixed, expand_size=None, normalize=False, max_calc_batch_size=4096):
         # First dim = batch_size * cur_beam_size
+        # print(beam.size())
+        if self.tmp is not None:
+            if beam.size() != self.tmp.size(1):
+                print(self.tmp.size(), beam.size())
+                k = beam.size() // self.tmp.size(1)
+                _, batch_size, emd_size = self.tmp.size()
+                self.tmp = self.tmp.repeat(1, 1, k).view(1, -1).view(1, batch_size * k, emd_size)
         log_p_topk, ind_topk = compute_in_batches(
-            lambda b: self._get_log_p_topk(fixed[b.ids], b.state, k=expand_size, normalize=normalize),
+            lambda b: self._get_log_p_topk(fixed[b.ids], b.state, k=expand_size, normalize=normalize, last_hh=self.tmp),
             max_calc_batch_size, beam, n=beam.size()
         )
 
         assert log_p_topk.size(1) == 1, "Can only have single step"
         # This will broadcast, calculate log_p (score) of expansions
         score_expand = beam.score[:, None] + log_p_topk[:, 0, :]
-
         # We flatten the action as we need to filter and this cannot be done in 2d
         flat_action = ind_topk.view(-1)
+
         flat_score = score_expand.view(-1)
         flat_feas = flat_score > -1e10  # != -math.inf triggers
 
@@ -206,7 +218,6 @@ class AttentionModel(nn.Module):
             return None, None, None
 
         feas_ind = feas_ind_2d[:, 0]
-
         return flat_parent[feas_ind], flat_action[feas_ind], flat_score[feas_ind]
 
     def _calc_log_likelihood(self, _log_p, a, mask):
@@ -324,10 +335,11 @@ class AttentionModel(nn.Module):
         )
 
     def _select_node(self, probs, mask):
-
+        # print(probs.size())
         assert (probs == probs).all(), "Probs should not contain any nans"
 
         if self.decode_type == "greedy":
+
             logp, selected = probs.max(1)
             assert not mask.gather(1, selected.unsqueeze(
                 -1)).data.any(), "Decode greedy: infeasible action has maximum probability"
@@ -365,9 +377,8 @@ class AttentionModel(nn.Module):
         )
         return AttentionModelFixed(embeddings, fixed_context, *fixed_attention_node_data)
 
-    def _get_log_p_topk(self, fixed, state, k=None, normalize=True):
-        log_p, _ = self._get_log_p(fixed, state, normalize=normalize)
-
+    def _get_log_p_topk(self, fixed, state, k=None, normalize=True, last_hh=None):
+        log_p, _, self.tmp = self._get_log_p_rnn(fixed, state, normalize=normalize, last_hh=last_hh)
         # Return topk
         if k is not None and k < log_p.size(-1):
             return log_p.topk(k, -1)
@@ -387,7 +398,6 @@ class AttentionModel(nn.Module):
         # query就是上面两个(512,1,128)相加
         query = fixed.context_node_projected + \
                 self.project_step_context(self._get_parallel_step_context(fixed.node_embeddings, state))
-        a=self._get_parallel_step_context(fixed.node_embeddings, state)
         # Compute keys and values for the nodes
         glimpse_K, glimpse_V, logit_K = self._get_attention_node_data(fixed, state)
 
@@ -474,9 +484,9 @@ class AttentionModel(nn.Module):
         batch_size, num_steps = current_node.size()
         if state.i.item() == 0:
             # decoder_hidden = self.x0.expand(batch_size, -1, -1)
-            decoder_hidden = self.first_placeholder[None, None, :].expand(batch_size, 1, -1)
+            decoder_input = self.first_placeholder[None, None, :].expand(batch_size, 1, -1)
         else:
-            decoder_hidden = fixed.node_embeddings.gather(
+            decoder_input = fixed.node_embeddings.gather(
                 1,
                 current_node[:, :, None].expand(batch_size, 1, fixed.node_embeddings.size(-1))
             )
@@ -485,18 +495,22 @@ class AttentionModel(nn.Module):
 
         if last_hh is None:
             last_hh = fixed.context_node_projected.transpose(1, 0)
+
+        # query = last_hh
+
         self.gru.flatten_parameters()
-        rnn_out, last_hh = self.gru(decoder_hidden, last_hh)
+        rnn_out, last_hh = self.gru(decoder_input, last_hh)
 
+        # query = self.project_query(torch.cat((rnn_out,fixed.context_node_projected), dim=-1))
         query = rnn_out
-
         # Compute keys and values for the nodes
         glimpse_K, glimpse_V, logit_K = self._get_attention_node_data(fixed, state)
         # add dynamic
         dynamic_hidden = self.init_dynamic(state.get_dynamic().transpose(1, 2))
+        # logit_K = logit_K + dynamic_hidden.unsqueeze(1)
+        logit_K = logit_K.mul(1+dynamic_hidden.unsqueeze(1))
+        # logit_K = state.get_dynamic().transpose(1, 2).expand_as(logit_K.squeeze(1)).mul(logit_K.squeeze(1)).unsqueeze(1)
 
-        logit_K = logit_K + dynamic_hidden.unsqueeze(1)
-        # logit_K = logit_K.mul(1+dynamic_hidden.unsqueeze(1))
         # Compute the mask
         mask = state.get_mask()
 
@@ -681,3 +695,137 @@ class AttentionModel(nn.Module):
             .expand(v.size(0), v.size(1) if num_steps is None else num_steps, v.size(2), self.n_heads, -1)
             .permute(3, 0, 1, 2, 4)  # (n_heads, batch_size, num_steps, graph_size, head_dim)
         )
+
+    def beam_search_fast(self, input):
+        import numpy as np
+        # beam sequence
+        _, len_citys, _ = input['loc'].size()
+
+        if self.checkpoint_encoder:
+            embeddings, _ = checkpoint(self.embedder, self._init_embed(input))
+        else:
+            embeddings, _ = self.embedder(self._init_embed(input))
+
+        state = self.problem.make_state(input)
+        fixed = self._precompute(embeddings)
+
+        def check_duplication(l, target):
+            for element in l:
+                if (target[:len(element)] == element).all():
+                    return False
+            return True
+
+        def rank_batch(batch):
+            _, ind = batch.sum(dim=0).min(dim=-1)
+            return ind
+
+        tour_list = []
+        cost_list = []
+        inds_list = []
+        import itertools
+        # for i in range(1000):
+        #     inds_selection = np.random.randint(0, 2, len_citys/2)
+        #     while not check_duplication(inds_list, inds_selection):
+        #         inds_selection = np.random.randint(0, 2, len_citys/2)
+
+            # tmp = np.zeros(len_citys/2)
+        i=0
+        for beam_seq in itertools.product([0, 1], repeat=int(len_citys/2)):
+            if i>1000:
+                break
+            inds_selection = np.flip(beam_seq)
+            # print(inds_selection)
+            if not check_duplication(inds_list, inds_selection):
+                continue
+            result = self._beam_forward(state, fixed, inds_selection)
+            if result is None:
+                continue
+            _log_p, pi, inds_actual = result
+            inds_list.append(inds_actual)
+            cost, mask = self.problem.get_costs(input, pi)
+            tour_list.append(pi)
+            cost_list.append(cost.unsqueeze(-1))
+            if i%50 == 0:
+                print(i)
+            i=i+1
+        cost_list = torch.cat(cost_list, dim=-1)
+        best_ = rank_batch(cost_list)
+
+        return tour_list[best_], cost_list[:,best_]
+
+    def _beam_forward(self, state, fixed, inds_selection):
+
+        def select_node(probs, mask, ind):
+            assert (probs == probs).all(), "Probs should not contain any nans"
+
+
+
+            logps, selects = probs.sort(1)
+            if (logps[:, -(ind+1)] == 0).any():
+                logp, selected = probs.max(1)
+            else:
+                logp = logps[:, -(ind+1)]
+                selected = selects[:, -(ind + 1)]
+
+            if logp.size(-1) == 1:
+                return None
+            # assert not mask.gather(1, selected.unsqueeze(
+            #     -1)).data.any(), "Decode greedy: infeasible action has maximum probability"
+            if mask.gather(1, selected.unsqueeze(-1)).data.any():
+                return None
+
+            return logp.log(), selected
+
+        outputs = []
+        sequences = []
+
+        batch_size = state.ids.size(0)
+
+        last_hh = None
+        # Perform decoding steps
+        i = 0
+        while not (self.shrink_size is None and state.all_finished()):
+
+            if self.shrink_size is not None:
+                unfinished = torch.nonzero(state.get_finished() == 0)
+                if len(unfinished) == 0:
+                    break
+                unfinished = unfinished[:, 0]
+                # Check if we can shrink by at least shrink_size and if this leaves at least 16
+                # (otherwise batch norm will not work well and it is inefficient anyway)
+                if 1 <= len(unfinished) <= state.ids.size(0) - self.shrink_size:
+                    # Filter states
+                    state = state[unfinished]
+                    fixed = fixed[unfinished]
+                    last_hh = last_hh.transpose(0, 1)[unfinished].transpose(0, 1)
+            if i > len(inds_selection)-1:
+                ind = np.random.randint(0,1,1)
+            else:
+                ind = inds_selection[i]
+
+            log_p, mask, last_hh = self._get_log_p_rnn(fixed, state, normalize=True, last_hh=last_hh)
+
+            # Select the indices of the next nodes in the sequences, result (batch_size) long
+            if select_node(log_p.exp()[:, 0, :], mask[:, 0, :], ind) is None:
+                return None
+            logp_selected, selected = select_node(log_p.exp()[:, 0, :], mask[:, 0, :], ind)  # Squeeze out steps dimension
+
+            state = state.update(selected)
+
+            # Now make log_p, selected desired output size by 'unshrinking'
+            if self.shrink_size is not None and state.ids.size(0) < batch_size:
+                log_p_, selected_ = logp_selected, selected
+                logp_selected = log_p_.new_zeros(batch_size)
+                selected = selected_.new_zeros(batch_size) - 1
+
+                logp_selected[state.ids[:, 0]] = log_p_
+                selected[state.ids[:, 0]] = selected_
+
+            # Collect output of step
+            outputs.append(logp_selected)
+            sequences.append(selected)
+
+            i += 1
+
+        # Collected lists, return Tensor
+        return torch.stack(outputs, 1), torch.stack(sequences, 1), inds_selection[:i]
