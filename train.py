@@ -10,7 +10,14 @@ from torch.nn import DataParallel
 from nets.attention_model import set_decode_type
 from utils.log_utils import log_values
 from utils import move_to
+from multiprocessing import Pool
+import multiprocessing
+import signal
 
+
+def initializer():
+    """Ignore CTRL+C in the worker process."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def get_inner_model(model):
     return model.module if isinstance(model, DataParallel) else model
@@ -64,6 +71,40 @@ def clip_grad_norms(param_groups, max_norm=math.inf):
     return grad_norms, grad_norms_clipped
 
 
+
+
+
+
+def baseline_ls_async_generate(dataset, epoch_size):
+    baseline_LS_name = 'bl_ls.txt'
+    from LS import LS1
+    import numpy as np
+    def write_async(dataset):
+        # np.random.seed(i)
+        for loc in dataset:
+            loc = loc.numpy()
+            # print(loc.shape)
+            tour = LS1.LS(loc, 7)
+            cost = LS1.dist(loc, tour)
+            print(cost)
+            time.sleep(np.random.rand(1) * 2)
+            f = open(baseline_LS_name, 'a')
+            f.write(str(cost))
+            f.write("\n")
+            f.flush()
+            f.close()
+    pool = Pool(initializer=initializer)
+    locs = [item['loc'] for item in dataset[:]]
+    n_workers = multiprocessing.cpu_count()
+    nums = int(epoch_size / n_workers)
+    try:
+        for i in range(n_workers):
+            worker_dataset = locs[i * nums:(i + 1) * nums]
+            pool.apply_async(write_async, args=(worker_dataset,))
+    except KeyboardInterrupt:
+        print("Stop!!!!!!!!!!!!")
+        pool.terminate()
+
 def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_dataset, problem, tb_logger, opts):
     print("Start train epoch {}, lr={} for run {}".format(epoch, optimizer.param_groups[0]['lr'], opts.run_name))
     step = epoch * (opts.epoch_size // opts.batch_size)
@@ -74,9 +115,15 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_dataset, pr
         tb_logger.log_value('learnrate_pg0', optimizer.param_groups[0]['lr'], step)
 
     # Generate new training data for each epoch
-    training_dataset = baseline.wrap_dataset(problem.make_dataset(
-        size=opts.graph_size, num_samples=opts.epoch_size, distribution=opts.data_distribution))
+    dataset = problem.make_dataset(
+        size=opts.graph_size, num_samples=opts.epoch_size, distribution=opts.data_distribution)
+    training_dataset = baseline.wrap_dataset(dataset)
     training_dataloader = DataLoader(training_dataset, batch_size=opts.batch_size, num_workers=1)
+
+    # baseline LS
+    # pool.terminate()
+    # baseline_ls_async_generate(dataset, opts.epoch_size)
+
 
     # Put model in train mode!
     model.train()
@@ -119,7 +166,7 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_dataset, pr
     if not opts.no_tensorboard:
         tb_logger.log_value('val_avg_reward', avg_reward, step)
 
-    baseline.epoch_callback(model, epoch)
+    # baseline.epoch_callback(model, epoch)
 
 
 def train_batch(
@@ -143,6 +190,16 @@ def train_batch(
     # Evaluate baseline, get baseline loss if any (only for critic)
     bl_val, bl_loss = baseline.eval(x, cost) if bl_val is None else (bl_val, 0)
 
+    # Baseline LS
+    # import os
+    # import numpy as np
+    # if os.path.exists('bl_ls.txt'):
+    #     bs_costs = np.loadtxt('bl_ls.txt')
+    #     bl_val = bs_costs.mean()
+    # else:
+    #     bl_val = 0
+    # print("Current basline_LS: ", bl_val)
+    # bl_loss = 0
     # bl_val = bl_val * 0.8
     # Calculate loss
     reinforce_loss = ((cost - bl_val) * log_likelihood).mean()

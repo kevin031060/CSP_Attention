@@ -117,8 +117,8 @@ def best_add_position(loc, tour, node):
 
 def del_redundant(loc, tour, cover_range):
     tour_ori = tour
-    for node in tour:
-        del_tour = np.setdiff1d(tour_ori, node)
+    for node in tour_ori:
+        del_tour = np.delete(tour_ori, np.where(tour_ori==node))
         if check_cover(loc, del_tour, cover_range):
             tour_ori = del_tour
     return tour_ori
@@ -131,7 +131,7 @@ def mutate(loc, tour, cover_range, best_tour, best_cost):
         tour = np.insert(tour, best_pos, r)
     else:
         # remove this node, and check feasible
-        del_tour = np.setdiff1d(tour, r)
+        del_tour = np.delete(tour, np.where(tour==r))
         nodes_not_select = np.setdiff1d(np.arange(loc.shape[0]), del_tour)
         tour = feasible_process(loc, del_tour, nodes_not_select, cover_range)
     cost_now =  dist(loc, tour)
@@ -139,7 +139,7 @@ def mutate(loc, tour, cover_range, best_tour, best_cost):
         best_tour = tour
         best_cost = best_cost
     return tour, best_tour, best_cost
-def LS(loc, cover_range, tour):
+def LS(loc, cover_range, tour=None , print_enable=True):
     # print(np.random.seed())
     num_nodes = loc.shape[0]
     if tour is None:
@@ -159,7 +159,8 @@ def LS(loc, cover_range, tour):
         # del_num = 1
         del_probs = delete_nodes_probs(loc, tour)
         del_nodes = np.random.choice(tour, size=del_num, replace=False, p=del_probs)
-        deleted_tour = np.setdiff1d(tour, del_nodes)
+        del_inds = [np.where(tour == node) for node in del_nodes]
+        deleted_tour = np.delete(tour, del_inds)
         # feasible process
         feasible_tour = feasible_process(loc, deleted_tour, nodes_not_select, cover_range)
         # del redundant nodes
@@ -178,13 +179,13 @@ def LS(loc, cover_range, tour):
                     best_tour = tour
                     best_cost = cost_now
                     iter_no_change = 0
-                    print("replace All")
+                    # print("replace All")
             else:
                 tour = best_tour
                 iter_no_change = iter_no_change + 1
         else:
             if cost_now < best_cost:
-                print("replace All")
+                # print("replace All")
                 tour = clean_tour
                 best_tour = tour
                 best_cost = cost_now
@@ -196,18 +197,24 @@ def LS(loc, cover_range, tour):
             if iter_no_change > mutate_iters:
                 tour, best_tour, best_cost = mutate(loc, tour, cover_range, best_tour, best_cost)
         # if iter_no_change > loc.shape[0]:
-        if iter_no_change > 30:
+        if iter_no_change > 50:
             break
         # log
-        if i % 40 == 0:
-            print("Iteration %d, Current distance: %2.3f" % (i, best_cost))
+        if print_enable:
+            if i % 40 == 0:
+                print("Iteration %d, Current distance: %2.3f" % (i, best_cost))
     return best_tour
 
+# del_perc = 0.1
+# max_iters = 400
+# mutate_iters = 15
+# if_diverse = False
+# if_mutate = False
 del_perc = 0.2
-max_iters = 400
+max_iters = 500
 mutate_iters = 15
-if_diverse = True
-if_mutate = True
+if_diverse = False
+if_mutate = False
 a = 0.1
 if __name__ == '__main__':
     # np.random.seed(123)

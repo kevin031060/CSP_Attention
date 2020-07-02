@@ -8,20 +8,20 @@ def get_options(args=None):
     parser = argparse.ArgumentParser(
         description="Attention based model for solving the Travelling Salesman Problem with Reinforcement Learning")
 
-    # Data
+    # Data, 100,256,160000
     parser.add_argument('--problem', default='csp', help="The problem to solve, default 'tsp'")
-    parser.add_argument('--graph_size', type=int, default=100, help="The size of the problem graph")
-    parser.add_argument('--batch_size', type=int, default=256, help='Number of instances per batch during training')
-    parser.add_argument('--epoch_size', type=int, default=160000, help='Number of instances per epoch during training')
+    parser.add_argument('--graph_size', type=int, default=200, help="The size of the problem graph")
+    parser.add_argument('--batch_size', type=int, default=100, help='Number of instances per batch during training')
+    parser.add_argument('--epoch_size', type=int, default=320000, help='Number of instances per epoch during training')
     parser.add_argument('--val_size', type=int, default=10000,
                         help='Number of instances used for reporting validation performance')
     parser.add_argument('--val_dataset', type=str, default=None, help='Dataset file to use for validation')
 
-    # Model
+    # Model n_encode_layers 3
     parser.add_argument('--model', default='attention', help="Model, 'attention' (default) or 'pointer'")
     parser.add_argument('--embedding_dim', type=int, default=128, help='Dimension of input embedding')
     parser.add_argument('--hidden_dim', type=int, default=128, help='Dimension of hidden layers in Enc/Dec')
-    parser.add_argument('--n_encode_layers', type=int, default=3,
+    parser.add_argument('--n_encode_layers', type=int, default=1,
                         help='Number of layers in the encoder/critic network')
     parser.add_argument('--tanh_clipping', type=float, default=10.,
                         help='Clip the parameters to within +- this value using tanh. '
@@ -36,9 +36,9 @@ def get_options(args=None):
     # !! changed 1.0
     parser.add_argument('--lr_decay', type=float, default=1.0, help='Learning rate decay per epoch')
     parser.add_argument('--eval_only', action='store_true', help='Set this value to only evaluate model')
-    parser.add_argument('--n_epochs', type=int, default=30, help='The number of epochs to train')
-    parser.add_argument('--seed', type=int, default=12345, help='Random seed to use') #1234
-    parser.add_argument('--max_grad_norm', type=float, default=5,
+    parser.add_argument('--n_epochs', type=int, default=50, help='The number of epochs to train')
+    parser.add_argument('--seed', type=int, default=1234, help='Random seed to use') #1234
+    parser.add_argument('--max_grad_norm', type=float, default=0,
                         help='Maximum L2 norm for gradient clipping, default 1.0 (0 to disable clipping)')
     parser.add_argument('--no_cuda', action='store_true', help='Disable CUDA')
     parser.add_argument('--exp_beta', type=float, default=0.8,
