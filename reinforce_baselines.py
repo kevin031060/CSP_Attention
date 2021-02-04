@@ -82,6 +82,11 @@ class NoBaseline(Baseline):
     def eval(self, x, c):
         return 0, 0  # No baseline, no loss
 
+class ConstantBaseline(Baseline):
+    def __init__(self, v):
+        self.v = v
+    def eval(self, x, c):
+        return self.v, 0  # No baseline, no loss
 
 class ExponentialBaseline(Baseline):
 

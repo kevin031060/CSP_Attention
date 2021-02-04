@@ -9,25 +9,24 @@ import matplotlib.pyplot as plt
 
 class Test_CSPDataset(Dataset):
 
-    def __init__(self, size=50, num_samples=500000, cover_range=7, seed = None, tsp_name=None, sample_mode=False):
+    def __init__(self, size=50, num_samples=500000, cover_range=7, radius = 0.3, seed = None, tsp_name=None, sample_mode=False, test_instance=None, varible_NC=False):
         super(Test_CSPDataset, self).__init__()
 
         if seed is not None:
             np.random.seed(seed)
             torch.manual_seed(seed)
 
-
-        if sample_mode:
-            loc = torch.rand(size, 2)
-            self.data = [
-                {
-                    'loc': loc,
-                    'cover_range': cover_range
-                }
-                for i in range(num_samples)
-            ]
-        else:
-            if tsp_name is None:
+        if radius is None:
+            if sample_mode:
+                loc = torch.rand(size, 2)
+                self.data = [
+                    {
+                        'loc': loc,
+                        'cover_range': cover_range
+                    }
+                    for i in range(num_samples)
+                ]
+            else:
                 self.data = [
                     {
                         'loc': torch.rand(size, 2),
@@ -35,18 +34,54 @@ class Test_CSPDataset(Dataset):
                     }
                     for i in range(num_samples)
                 ]
-            else:
-                dataset = tsplib_dataset(tsp_name)
+        else:
+            if sample_mode:
+                loc = torch.rand(size, 2)
                 self.data = [
                     {
-                        'loc': dataset[i],
-                        'cover_range': cover_range
+                        'loc': loc,
+                        'cover_range': cover_range,
+                        'radius': radius
                     }
                     for i in range(num_samples)
                 ]
-
-
-
+            else:
+                if tsp_name is None:
+                    if test_instance is None:
+                        self.data = [
+                            {
+                                'loc': torch.rand(size, 2),
+                                'cover_range': cover_range
+                            }
+                            for i in range(num_samples)
+                        ]
+                    else:
+                        self.data = [
+                            {
+                                'loc': torch.Tensor(test_instance),
+                                'cover_range': cover_range
+                            }
+                            for i in range(num_samples)
+                        ]
+                else:
+                    dataset = tsplib_dataset(tsp_name)
+                    self.data = [
+                        {
+                            'loc': dataset[i],
+                            'cover_range': cover_range
+                        }
+                        for i in range(num_samples)
+                    ]
+        if varible_NC:
+            loc = torch.rand(size, 2)
+            cover_range = torch.randint(2, 16, (size, ))
+            self.data = [
+                {
+                    'loc': loc,
+                    'cover_range': cover_range,
+                }
+                for i in range(num_samples)
+            ]
         self.size = len(self.data)
         self.cover_range = cover_range
 

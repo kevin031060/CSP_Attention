@@ -115,8 +115,18 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_dataset, pr
         tb_logger.log_value('learnrate_pg0', optimizer.param_groups[0]['lr'], step)
 
     # Generate new training data for each epoch
-    dataset = problem.make_dataset(
-        size=opts.graph_size, num_samples=opts.epoch_size, distribution=opts.data_distribution)
+
+    if opts.test_instance is None:
+        dataset = problem.make_dataset(
+            size=opts.graph_size, num_samples=opts.epoch_size, distribution=opts.data_distribution)
+    else:
+        from test_plot.test_dataset import Test_CSPDataset
+        dataset = Test_CSPDataset(size=opts.graph_size, num_samples=opts.epoch_size,
+                                  cover_range=opts.cover, seed=1234,
+                                  sample_mode=True)
+        val_dataset = Test_CSPDataset(size=opts.graph_size, num_samples=opts.val_size,
+                                  cover_range=opts.cover, seed=1234,
+                                  sample_mode=True)
     training_dataset = baseline.wrap_dataset(dataset)
     training_dataloader = DataLoader(training_dataset, batch_size=opts.batch_size, num_workers=1)
 
@@ -130,7 +140,7 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_dataset, pr
     set_decode_type(model, "sampling")
 
     for batch_id, batch in enumerate(tqdm(training_dataloader, disable=opts.no_progress_bar)):
-
+        t1=time.time()
         train_batch(
             model,
             optimizer,
@@ -142,7 +152,7 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_dataset, pr
             tb_logger,
             opts
         )
-
+        print("One batch:",time.time()-t1)
         step += 1
 
     epoch_duration = time.time() - start_time
@@ -166,7 +176,7 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_dataset, pr
     if not opts.no_tensorboard:
         tb_logger.log_value('val_avg_reward', avg_reward, step)
 
-    # baseline.epoch_callback(model, epoch)
+    baseline.epoch_callback(model, epoch)
 
 
 def train_batch(

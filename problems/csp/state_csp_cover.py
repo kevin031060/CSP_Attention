@@ -19,6 +19,7 @@ class StateCSP(NamedTuple):
     # mask_cover
     mask_cover: torch.Tensor
     cover_range: torch.Tensor
+    radius: torch.Tensor
     dynamic: torch.Tensor
     dynamic_updation: torch.Tensor
     lengths: torch.Tensor
@@ -27,7 +28,7 @@ class StateCSP(NamedTuple):
 
     @property
     def visited(self):
-        if self.visited_.dtype == torch.bool:
+        if self.visited_.dtype == torch.uint8:
             return self.visited_
         else:
             return mask_long2bool(self.visited_, n=self.loc.size(-2))
@@ -48,9 +49,10 @@ class StateCSP(NamedTuple):
         return super(StateCSP, self).__getitem__(key)
 
     @staticmethod
-    def initialize(input, visited_dtype=torch.bool):
+    def initialize(input, visited_dtype=torch.uint8):
         loc = input['loc']
         cover_range = input['cover_range']
+        radius = input['radius']
         batch_size, n_loc, _ = loc.size()
         prev_a = torch.zeros(batch_size, 1, dtype=torch.long, device=loc.device)
 
@@ -64,20 +66,21 @@ class StateCSP(NamedTuple):
             visited_=(  # Visited as mask is easier to understand, as long more memory efficient
                 torch.zeros(
                     batch_size, 1, n_loc,
-                    dtype=torch.bool, device=loc.device
+                    dtype=torch.uint8, device=loc.device
                 )
-                if visited_dtype == torch.bool
+                if visited_dtype == torch.uint8
                 else torch.zeros(batch_size, 1, (n_loc + 63) // 64, dtype=torch.int64, device=loc.device)  # Ceil
             ),
             mask_cover=(  # Visited as mask is easier to understand, as long more memory efficient
                 torch.zeros(
                     batch_size, 1, n_loc,
-                    dtype=torch.bool, device=loc.device
+                    dtype=torch.uint8, device=loc.device
                 )
-                if visited_dtype == torch.bool
+                if visited_dtype == torch.uint8
                 else torch.zeros(batch_size, 1, (n_loc + 63) // 64, dtype=torch.int64, device=loc.device)  # Ceil
             ),
             cover_range=cover_range[0],
+            radius=radius[0],
             dynamic=torch.ones(batch_size, 1, n_loc, dtype=torch.float, device=loc.device),
             # dynamic_updation=torch.log(torch.arange(cover_range[0], device=loc.device).float()+1.0).
             #                      expand(batch_size,1,-1)/torch.log(cover_range[0].float()),
@@ -114,7 +117,7 @@ class StateCSP(NamedTuple):
         # Update should only be called with just 1 parallel step, in which case we can check this way if we should update
         first_a = prev_a if self.i.item() == 0 else self.first_a
 
-        if self.visited_.dtype == torch.bool:
+        if self.visited_.dtype == torch.uint8:
             # Add one dimension since we write a single value
             visited_ = self.visited_.scatter(-1, prev_a[:, :, None], 1)
         else:
@@ -122,14 +125,41 @@ class StateCSP(NamedTuple):
 
         # mask covered cities
         batch_size, sequence_size, _ = self.loc.size()
+        batch_size = self.ids.size(0)
         dists = (self.loc[self.ids.squeeze(-1)]-cur_coord).norm(p=2, dim=-1)
-        nearest_idx = dists.argsort()[:,:self.cover_range+1]
-        mask_cover = self.mask_cover.scatter(-1, nearest_idx.unsqueeze(1), 1)
+        # nearest_idx = torch.where(dists[0, :] < self.radius)[0].view(1, -1).expand(batch_size, -1)
+        # dists.argsort()[np.sort(dists) < 0.1] dists.argsort()[torch.sort(dists)[0]<0.15]
+
+        mask_cover = self.mask_cover.clone()
+        dynamic = self.dynamic.clone()
+
+        for i in range(batch_size):
+            if len(self.radius.size()) == 0:
+                n_idx = dists[i].argsort()[torch.sort(dists[i])[0] < self.radius]
+            else:
+
+                n_idx = dists[i].argsort()[torch.sort(dists[i])[0] < self.radius.squeeze(0)[selected[i]]]
+
+            mask_cover[i, 0, n_idx] = 1
+            dynamic[i, 0, n_idx[0]] = 0
+            if len(n_idx)>1:
+                n_idx = n_idx[1:]
+            dynamic_updation = torch.arange(n_idx.size(0), device=self.dynamic.device)\
+                                   .float() / n_idx.size(0)
+            dynamic[i, 0, n_idx] = dynamic[i, 0, n_idx].mul(dynamic_updation)
+
+
+
+
+        # nearest_idx = dists.argsort()[:,:self.cover_range+1]
+        # mask_cover = self.mask_cover.scatter(-1, nearest_idx.unsqueeze(1), 1)
 
         # update dynamic, give covered cities lower values
-        nearest_idx = nearest_idx[:,1:]
-        dynamic = self.dynamic.scatter(-1, nearest_idx.unsqueeze(1),
-                                       self.dynamic.gather(-1, nearest_idx.unsqueeze(1)).mul(self.dynamic_updation))
+        # nearest_idx = nearest_idx[:,1:]
+        # dynamic_updation = torch.arange(nearest_idx.size(-1), device=self.dynamic.device).float()\
+        #                        .expand(batch_size, 1, -1) / nearest_idx.size(-1)
+        # dynamic = self.dynamic.scatter(-1, nearest_idx.unsqueeze(1),
+        #                                self.dynamic.gather(-1, nearest_idx.unsqueeze(1)).mul(dynamic_updation))
         return self._replace(first_a=first_a, prev_a=prev_a, visited_=visited_, mask_cover=mask_cover,dynamic=dynamic,
                              lengths=lengths, cur_coord=cur_coord, i=self.i + 1)
 

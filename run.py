@@ -11,7 +11,7 @@ from tensorboard_logger import Logger as TbLogger
 from nets.critic_network import CriticNetwork
 from options import get_options
 from train import train_epoch, validate, get_inner_model
-from reinforce_baselines import NoBaseline, ExponentialBaseline, CriticBaseline, RolloutBaseline, WarmupBaseline
+from reinforce_baselines import NoBaseline, ExponentialBaseline, CriticBaseline, RolloutBaseline, WarmupBaseline, ConstantBaseline
 from nets.attention_model import AttentionModel
 from nets.pointer_network import PointerNetwork, CriticNetworkLSTM
 from utils import torch_load_cpu, load_problem
@@ -29,7 +29,7 @@ def run(opts):
     tb_logger = None
     if not opts.no_tensorboard:
         tb_logger = TbLogger(os.path.join(opts.log_dir, "{}_{}".format(opts.problem, opts.graph_size), opts.run_name))
-
+    print(opts.save_dir)
     os.makedirs(opts.save_dir)
     # Save arguments so exact configuration can always be found
     with open(os.path.join(opts.save_dir, "args.json"), 'w') as f:
@@ -103,6 +103,8 @@ def run(opts):
         )
     elif opts.baseline == 'rollout':
         baseline = RolloutBaseline(model, problem, opts)
+    elif opts.baseline == 'constant':
+        baseline = ConstantBaseline(4.4)
     else:
         assert opts.baseline is None, "Unknown baseline: {}".format(opts.baseline)
         baseline = NoBaseline()

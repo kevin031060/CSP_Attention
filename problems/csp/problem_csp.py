@@ -2,7 +2,11 @@ from torch.utils.data import Dataset
 import torch
 import os
 import pickle
-from problems.csp.state_csp import StateCSP
+# Change different types of CSP tasks, change here
+from problems.csp.state_csp_cover import StateCSP
+# from problems.csp.state_csp import StateCSP
+# from problems.csp.state_csp_varibleNC import StateCSP
+
 from utils.beam_search import beam_search
 
 

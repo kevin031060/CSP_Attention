@@ -5,7 +5,7 @@ from LS.LS_2opt import LS_2opt
 
 
 
-def init_solution(loc, cover_range):
+def init_solution(loc, cover_range, radius = None):
     node_num, _ = loc.shape
     ids = np.arange(node_num)
     uncovered_indices = ids
@@ -15,29 +15,37 @@ def init_solution(loc, cover_range):
     while num_uncovered>0:
         n_selected = np.random.choice(uncovered_indices)
         tour.append(n_selected)
-        cover_indices = cover_idx(loc, n_selected, cover_range)
+        cover_indices = cover_idx(loc, n_selected, cover_range, radius)
         uncovered_indices = np.array([idx for idx in uncovered_indices if idx not in cover_indices])
         num_uncovered = uncovered_indices.shape[0]
 
-    print('Init_solution:',tour)
-    print('Assert covered check:',check_cover(loc, tour, cover_range))
+    # print('Init_solution:',tour)
+    # print('Assert covered check:',check_cover(loc, tour, cover_range))
     return np.array(tour)
 
-def cover_idx(loc, chosen_idx, cover_range):
-    dists = np.square(loc-loc[chosen_idx]).sum(-1)
-    return dists.argsort()[:cover_range+1]
-
-def check_cover(loc, tour, cover_range):
+def cover_idx(loc, chosen_idx, cover_range, radius = None):
+    dists = np.sqrt(np.square(loc-loc[chosen_idx]).sum(-1))
+    if radius is None:
+        if isinstance(cover_range, int):
+            return dists.argsort()[:cover_range+1]
+        else:
+            return dists.argsort()[:cover_range[chosen_idx]+1]
+    else:
+        if isinstance(radius, np.ndarray):
+            return dists.argsort()[np.sort(dists) <= radius[0, chosen_idx]]
+        else:
+            return dists.argsort()[np.sort(dists) <= radius]
+def check_cover(loc, tour, cover_range, radius = None):
     mask = np.zeros(loc.shape[0])
     for idx in tour:
-        cover_indices = cover_idx(loc, idx, cover_range)
+        cover_indices = cover_idx(loc, idx, cover_range, radius)
         mask[cover_indices]=1
     return mask.all()
 
-def get_uncovered_ids(loc, tour, cover_range):
+def get_uncovered_ids(loc, tour, cover_range, radius = None):
     mask = np.zeros(loc.shape[0])
     for idx in tour:
-        cover_indices = cover_idx(loc, idx, cover_range)
+        cover_indices = cover_idx(loc, idx, cover_range, radius)
         mask[cover_indices]=1
     return np.where(mask==0)
 
@@ -47,23 +55,26 @@ def dist(loc, tour):
 
 
 
-def render(loc, tour, cover_range):
-
+def render(loc, tour, cover_range, radius = None):
     plt.close('all')
     plt.scatter(loc.T[0],loc.T[1], s=4, c='r', zorder=2)
-    for i in range(loc.shape[0]):
-        plt.text(loc[i, 0],loc[i, 1], str(i))
-    for idx in tour:
-        nearest_indices = cover_idx(loc, idx, cover_range)
-        for nearest_idx in nearest_indices:
-            pair_coor = np.concatenate((loc[idx][np.newaxis,:], loc[nearest_idx][np.newaxis,:]), 0).T
-            plt.plot(pair_coor[0], pair_coor[1], linestyle='--', color='k', zorder=1, linewidth='0.5')
+    ax = plt.gca()
+    if radius is None:
+        for idx in tour:
+            nearest_indices = cover_idx(loc, idx, cover_range, radius)
+            for nearest_idx in nearest_indices:
+                pair_coor = np.concatenate((loc[idx][np.newaxis, :], loc[nearest_idx][np.newaxis, :]), 0).T
+                plt.plot(pair_coor[0], pair_coor[1], linestyle='--', color='k', zorder=1, linewidth='0.5')
+    else:
+        for idx in tour:
+            d = plt.Circle(loc[idx], radius, fill=False)
+            ax.add_artist(d)
+
     tour = np.append(tour, tour[0])
     loc_tour = loc[tour]
     plt.plot(loc_tour.T[0],loc_tour.T[1], zorder=1)
     plt.scatter(loc_tour[0, 0], loc_tour[0, 1], s=20, c='k', marker='*', zorder=3)
     plt.show()
-
 
 
 
@@ -80,19 +91,19 @@ def best_add_position(loc, tour, node):
             minmum_increase = dist_increase
     return best_pos, minmum_increase
 
-def del_redundant(loc, tour, cover_range):
+def del_redundant(loc, tour, cover_range, radius = None):
     tour_ori = tour
-    for node in tour:
-        del_tour = np.setdiff1d(tour_ori, node)
-        if check_cover(loc, del_tour, cover_range):
+    for node in tour_ori:
+        del_tour = np.delete(tour_ori, np.where(tour_ori==node))
+        if check_cover(loc, del_tour, cover_range, radius):
             tour_ori = del_tour
     return tour_ori
 
 
 
 
-def subsitute_by_neighbor(loc, del_tour, del_pos, del_node, ori_cost, cover_range):
-    neighbours = cover_idx(loc, del_node, loc.shape[0]-1)[1:]
+def subsitute_by_neighbor(loc, del_tour, del_pos, del_node, ori_cost, cover_range, radius = None):
+    neighbours = cover_idx(loc, del_node, loc.shape[0]-1, radius)[1:]
     neighbours = [i for i in neighbours if i not in del_tour]
     neighbours = neighbours[:min(T, len(neighbours))]
     # print(del_node, del_tour, neighbours)
@@ -102,7 +113,7 @@ def subsitute_by_neighbor(loc, del_tour, del_pos, del_node, ori_cost, cover_rang
         tour = np.insert(del_tour, del_pos, node)
         cost_now = dist(loc, tour)
         if cost_now<ori_cost:
-            if check_cover(loc, tour, cover_range):
+            if check_cover(loc, tour, cover_range, radius):
                 if cost_now < best_cost:
                     best_cost = cost_now
                     best_tour = tour
@@ -117,7 +128,7 @@ def perturbation_process(loc, tour, ids):
         tour = np.insert(tour, best_pos, node)
     return tour
 
-def improve_process(loc, tour, cover_range):
+def improve_process(loc, tour, cover_range, radius = None):
     improve = False
     ori_cost = dist(loc, tour)
     Ns = tour.shape[0]
@@ -125,11 +136,11 @@ def improve_process(loc, tour, cover_range):
     while del_pos < Ns:
         del_node = tour[del_pos]
         del_tour = np.delete(tour, del_pos)
-        if check_cover(loc, del_tour, cover_range):
+        if check_cover(loc, del_tour, cover_range, radius):
             improve = True
             tour = del_tour
         else:
-            subsituted_tour = subsitute_by_neighbor(loc, del_tour, del_pos, del_node, ori_cost, cover_range)
+            subsituted_tour = subsitute_by_neighbor(loc, del_tour, del_pos, del_node, ori_cost, cover_range, radius)
             if subsituted_tour is not None:
                 tour = subsituted_tour
                 improve = True
@@ -139,10 +150,10 @@ def improve_process(loc, tour, cover_range):
     return improve, tour
 
 
-def LS(loc, cover_range, tour=None, print_if=True):
+def LS(loc, cover_range, tour=None, print_if=True, stop_cost=-1e6, radius = None):
     num_nodes = loc.shape[0]
     if tour is None:
-        tour = init_solution(loc, cover_range)
+        tour = init_solution(loc, cover_range, radius)
     ids = np.arange(num_nodes)
     # render(loc, tour, cover_range)
     best_tour = tour
@@ -154,7 +165,7 @@ def LS(loc, cover_range, tour=None, print_if=True):
         for j in range(J):
             improve = True
             while improve is True:
-                improve, tour = improve_process(loc, tour, cover_range)
+                improve, tour = improve_process(loc, tour, cover_range, radius)
             tour = LS_2opt(loc, tour, 100)
             cost_now = dist(loc, tour)
             if cost_now < best_cost:
@@ -175,17 +186,19 @@ def LS(loc, cover_range, tour=None, print_if=True):
             tour = best_tour
             best_cost = cost_now
         iter_no_change_outer = iter_no_change_outer + 1
-        if iter_no_change_outer > 5:
+        if iter_no_change_outer > 3:
             break
         if print_if:
             print('Iter,', i, ' cost:', best_cost)
+        if best_cost <= stop_cost:
+            return best_tour
 
     return best_tour
 
 
 max_iters = 25
 
-J=200
+J=150
 T=10
 K=10
 
@@ -194,7 +207,7 @@ if __name__ == '__main__':
     loc=np.random.rand(20, 2)
     import time
     t1=time.time()
-    tour = LS2(loc, 7)
+    tour = LS(loc, 7)
     print(time.time()-t1)
     # tour = init_solution(loc, 7)
     render(loc,tour,7)

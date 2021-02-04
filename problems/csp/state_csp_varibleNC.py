@@ -1,7 +1,8 @@
 import torch
 from typing import NamedTuple
 from utils.boolmask import mask_long2bool, mask_long_scatter
-
+import warnings
+warnings.filterwarnings('ignore')
 
 class StateCSP(NamedTuple):
     # Fixed input
@@ -20,7 +21,6 @@ class StateCSP(NamedTuple):
     mask_cover: torch.Tensor
     cover_range: torch.Tensor
     dynamic: torch.Tensor
-    dynamic_updation: torch.Tensor
     lengths: torch.Tensor
     cur_coord: torch.Tensor
     i: torch.Tensor  # Keeps track of step
@@ -41,7 +41,6 @@ class StateCSP(NamedTuple):
                 visited_=self.visited_[key],
                 mask_cover=self.mask_cover[key],
                 dynamic=self.dynamic[key],
-                dynamic_updation=self.dynamic_updation[key],
                 lengths=self.lengths[key],
                 cur_coord=self.cur_coord[key] if self.cur_coord is not None else None,
             )
@@ -81,8 +80,6 @@ class StateCSP(NamedTuple):
             dynamic=torch.ones(batch_size, 1, n_loc, dtype=torch.float, device=loc.device),
             # dynamic_updation=torch.log(torch.arange(cover_range[0], device=loc.device).float()+1.0).
             #                      expand(batch_size,1,-1)/torch.log(cover_range[0].float()),
-            dynamic_updation=torch.arange(cover_range[0], device=loc.device).float().expand(batch_size, 1, -1) /
-                             cover_range[0],
 
             lengths=torch.zeros(batch_size, 1, device=loc.device),
             cur_coord=None,
@@ -123,13 +120,19 @@ class StateCSP(NamedTuple):
         # mask covered cities
         batch_size, sequence_size, _ = self.loc.size()
         dists = (self.loc[self.ids.squeeze(-1)]-cur_coord).norm(p=2, dim=-1)
-        nearest_idx = dists.argsort()[:,:self.cover_range+1]
-        mask_cover = self.mask_cover.scatter(-1, nearest_idx.unsqueeze(1), 1)
+        mask_cover = self.mask_cover.clone()
+        dynamic = self.dynamic.clone()
+        batch_size = self.ids.size(0)
+        for i in range(batch_size):
+            n_idx = dists[i].argsort()[:self.cover_range[selected[i]]+1]
+            mask_cover[i, 0, n_idx] = 1
+            dynamic[i, 0, n_idx[0]] = 0
+            if len(n_idx)>1:
+                n_idx = n_idx[1:]
+            dynamic_updation = torch.arange(n_idx.size(0), device=self.dynamic.device) \
+                                   .float() / n_idx.size(0)
+            dynamic[i, 0, n_idx] = dynamic[i, 0, n_idx].mul(dynamic_updation)
 
-        # update dynamic, give covered cities lower values
-        nearest_idx = nearest_idx[:,1:]
-        dynamic = self.dynamic.scatter(-1, nearest_idx.unsqueeze(1),
-                                       self.dynamic.gather(-1, nearest_idx.unsqueeze(1)).mul(self.dynamic_updation))
         return self._replace(first_a=first_a, prev_a=prev_a, visited_=visited_, mask_cover=mask_cover,dynamic=dynamic,
                              lengths=lengths, cur_coord=cur_coord, i=self.i + 1)
 
@@ -163,11 +166,11 @@ class StateCSP(NamedTuple):
             k = self.loc.size(-2)
         k = min(k, self.loc.size(-2) - self.i.item())  # Number of remaining
         return (
-            self.dist[
-                self.ids,
-                self.prev_a
-            ] +
-            self.visited.float() * 1e6
+                self.dist[
+                    self.ids,
+                    self.prev_a
+                ] +
+                self.visited.float() * 1e6
         ).topk(k, dim=-1, largest=False)[1]
 
     def construct_solutions(self, actions):
